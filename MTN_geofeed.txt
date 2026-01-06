@@ -1,0 +1,2 @@
+# Self-published geofeed as defined in datatracker.ietf.org/doc/html/rfc8805
+# MTNSAT US Geofeed,lastupdated (rfc3339): Tue Jan 6 14:20:01 EDT 2026
