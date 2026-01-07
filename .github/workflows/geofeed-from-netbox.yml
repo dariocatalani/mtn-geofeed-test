@@ -1,0 +1,96 @@
+name: Update geofeed from NetBox
+
+on:
+  repository_dispatch:
+    types: [netbox_geofeed_update]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate MTN_geofeed.txt (public IPv4+IPv6 only, no postal)
+        env:
+          NETBOX_URL: ${{ secrets.NETBOX_URL }}
+          NETBOX_TOKEN: ${{ secrets.NETBOX_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          json="$(curl -sS \
+            -H "Authorization: Token ${NETBOX_TOKEN}" \
+            -H "Accept: application/json" \
+            "${NETBOX_URL}/api/ipam/prefixes/?limit=0")"
+
+          # Output format (no postal-code):
+          # prefix,country,region,city
+          echo "prefix,country,region,city" > MTN_geofeed.txt
+
+          echo "$json" | jq -r '
+            def ip_only: split("/")[0] | ascii_downcase;
+            def is_v6: test(":");
+            def is_v4: test("^[0-9]+\\.");
+
+            # Non-public IPv4 ranges
+            def is_nonpublic_v4:
+              test("^10\\.") or
+              test("^192\\.168\\.") or
+              test("^172\\.(1[6-9]|2[0-9]|3[0-1])\\.") or
+              test("^100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.") or
+              test("^169\\.254\\.") or
+              test("^127\\.") or
+              test("^0\\.") or
+              test("^192\\.0\\.2\\.") or
+              test("^198\\.51\\.100\\.") or
+              test("^203\\.0\\.113\\.") or
+              test("^198\\.(1[8-9])\\.") or
+              test("^198\\.(2[0-9]|3[0-1])\\.") or
+              test("^(22[4-9]|23[0-9])\\.") or
+              test("^24[0-9]\\.") or
+              test("^25[0-5]\\.");
+
+            # Non-public IPv6 ranges
+            def is_nonpublic_v6:
+              test("^fc") or              # ULA fc00::/7
+              test("^fd") or
+              test("^fe(8|9|a|b)") or     # link-local fe80::/10
+              test("^ff") or              # multicast ff00::/8
+              test("^::$") or             # unspecified
+              test("^::1$") or            # loopback
+              test("^0:0:0:0:0:0:0:0$") or
+              test("^0:0:0:0:0:0:0:1$") or
+              test("^2001:db8");          # documentation
+
+            def is_public:
+              (is_v4 and (is_nonpublic_v4 | not)) or
+              (is_v6 and (is_nonpublic_v6 | not));
+
+            .results[]
+            | {pfx: .prefix, ip: (.prefix | ip_only), cf: (.custom_fields // {})}
+            | select((.cf.geo_country // "") != "" and (.cf.geo_region // "") != "" and (.cf.geo_city // "") != "")
+            | select((.ip | is_public))
+            | [ .pfx, (.cf.geo_country // ""), (.cf.geo_region // ""), (.cf.geo_city // "") ]
+            | @csv
+          ' >> MTN_geofeed.txt
+
+          echo "Lines: $(wc -l < MTN_geofeed.txt | tr -d ' ')"
+          head -n 5 MTN_geofeed.txt || true
+
+      - name: Commit and push (if changed)
+        run: |
+          set -euo pipefail
+          git config user.name "geofeed-bot"
+          git config user.email "geofeed-bot@users.noreply.github.com"
+
+          git add MTN_geofeed.txt
+          if git diff --cached --quiet; then
+            echo "No changes."
+            exit 0
+          fi
+
+          git commit -m "Update geofeed from NetBox"
+          git push
