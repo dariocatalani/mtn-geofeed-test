@@ -1,0 +1,20 @@
+name: Test NetBox Secrets
+
+on:
+  workflow_dispatch:   # lets you run it manually
+
+jobs:
+  test-netbox:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Verify secrets exist (no values shown)
+        run: |
+          [ -n "${{ secrets.NETBOX_URL }}" ] && echo "NETBOX_URL is set" || (echo "NETBOX_URL missing" && exit 1)
+          [ -n "${{ secrets.NETBOX_TOKEN }}" ] && echo "NETBOX_TOKEN is set" || (echo "NETBOX_TOKEN missing" && exit 1)
+
+      - name: Test NetBox API
+        run: |
+          curl -sS -k \
+            -H "Authorization: Token ${{ secrets.NETBOX_TOKEN }}" \
+            "${{ secrets.NETBOX_URL }}/api/status/"
