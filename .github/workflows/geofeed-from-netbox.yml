@@ -1,6 +1,7 @@
 name: Update geofeed from NetBox
 
 on:
+  workflow_dispatch:
   repository_dispatch:
     types: [netbox_geofeed_update]
 
